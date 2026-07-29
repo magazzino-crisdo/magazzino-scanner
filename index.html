@@ -219,6 +219,12 @@
         <span style="font-size:12px;color:var(--muted);font-weight:600;">Referente: <span id="referenteLabel" style="color:var(--ink);"></span></span>
         <button onclick="switchReferente()" style="background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;cursor:pointer;">cambia</button>
       </div>
+      <div id="categoryWrap" style="margin-bottom:12px;">
+        <label class="field-label" for="categorySelect">Categoria (obbligatoria per il carico)</label>
+        <select id="categorySelect" style="width:100%;padding:11px 12px;font-size:14px;border-radius:9px;border:2px solid var(--border);font-family:'Inter',sans-serif;background:#fdfcfa;">
+          <option value="">-- Seleziona categoria --</option>
+        </select>
+      </div>
       <div class="mode-toggle">
         <button class="mode-btn carico" id="btnCarico" onclick="setMode('carico')">
           CARICO
@@ -245,6 +251,7 @@
       </div>
 
       <div class="feedback" id="feedback"></div>
+      <button id="undoBtn" onclick="undoLastScan()" style="display:none;margin-top:10px;width:100%;padding:11px;border-radius:10px;border:2px solid var(--warn);background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:13.5px;cursor:pointer;"></button>
     </div>
   </div>
 
@@ -290,26 +297,33 @@ function isValidBarcode(code){
   return /^\d{8}$|^\d{12}$|^\d{13}$/.test(code);
 }
 let referente = '';
+let lastAction = null; // { code, delta, referente, name } — per il pulsante "Annulla"
 
-const CATEGORY_RULES = [
-  ['Pasta e riso', ['pasta','riso','rice','noodle','couscous','semolino']],
-  ['Legumi', ['legum','bean','fagiol','lenticch','lentil','cec','pea','piselli']],
-  ['Scatolame e conserve', ['canned','conserv','sugo','pomodoro','tomato','tonno','tuna','passata']],
-  ['Biscotti e dolci', ['biscuit','biscott','cooki','snack dolc','merend','cioccolat','chocolate','dolciumi']],
-  ['Olio e condimenti', ['olio','oil','aceto','vinegar','condiment']],
-  ['Zucchero e sale', ['zucchero','sugar','sale','salt']],
-  ['Bevande', ['bevand','drink','beverage','succo','juice','acqua','water']],
-  ['Prima infanzia', ['baby','infant','neonat','pappa','omogeneizzat']],
-  ['Igiene personale', ['hygien','igien','shampoo','sapone','soap','detergent']],
+// Categorie reali usate dal magazzino CRI San Donato per organizzare gli scaffali e i pacchi.
+// Elenco fisso e volutamente chiuso: non modificabile da chi scansiona, solo da qui nel codice.
+const CATEGORIES = [
+  'Aceto - Olio di tutti i tipi',
+  "Alimenti per l'infanzia",
+  'Igiene personale',
+  '1ª colazione',
+  'Caffè, tè, camomilla, bevande al cioccolato, orzo',
+  'Caramelle, cioccolata, frutta sciroppata',
+  'Carne e tonno in scatola',
+  'Crackers, grissini, pane in cassetta, taralli',
+  'Detersivi',
+  'Farina, zucchero, sale',
+  "Latte per l'infanzia",
+  'Latte UHT',
+  'Legumi in scatola o secchi',
+  'Marmellata, crema di nocciole, miele',
+  'Pandoro, panettone, colomba - prodotti stagionali',
+  'Pannolini, assorbenti',
+  'Passata, sughi pronti, pesto, concentrato',
+  'Pasta, riso',
+  'Succhi di frutta',
+  'Dadi, zuppe, minestre pronte',
+  'Fuori Lista'
 ];
-
-function guessCategory(offCategories){
-  const text = (offCategories || '').toLowerCase();
-  for(const [label, keywords] of CATEGORY_RULES){
-    if(keywords.some(k => text.includes(k))) return label;
-  }
-  return 'Altro';
-}
 
 async function loadInventoryFromSheet(){
   try{
@@ -363,6 +377,7 @@ function setMode(m){
   mode = m;
   document.getElementById('btnCarico').classList.toggle('active', m==='carico');
   document.getElementById('btnScarico').classList.toggle('active', m==='scarico');
+  document.getElementById('categoryWrap').style.display = (m === 'carico') ? 'block' : 'none';
   document.getElementById('barcodeInput').focus();
 }
 setMode('carico');
@@ -423,6 +438,18 @@ async function handleScan(code, fromCamera){
   if(code === lastScan.code && (now - lastScan.t) < 1500) return; // stesso codice troppo ravvicinato
   lastScan = { code, t: now };
 
+  const delta = mode === 'carico' ? 1 : -1;
+
+  // La categoria è obbligatoria solo in carico; in scarico non si tocca la categoria
+  let categoryOverride = null;
+  if(mode === 'carico'){
+    categoryOverride = document.getElementById('categorySelect').value;
+    if(!categoryOverride){
+      showFeedback('warn', 'Seleziona prima una categoria', 'Necessaria per il carico');
+      return;
+    }
+  }
+
   if(fromCamera){
     lastAcceptedCode = code; // resta "bloccato" finché non sparisce dall'inquadratura
     if(!usingNativeDetector && window.Quagga){
@@ -431,7 +458,6 @@ async function handleScan(code, fromCamera){
     }
   }
 
-  const delta = mode === 'carico' ? 1 : -1;
   let item = data.items[code];
   let productInfo = null;
 
@@ -444,7 +470,7 @@ async function handleScan(code, fromCamera){
     const info = await lookupProduct(code);
     productInfo = {
       name: info.name || 'Prodotto sconosciuto',
-      category: info.category || 'Altro',
+      category: categoryOverride,
       weight: info.weight || ''
     };
   }
@@ -453,7 +479,7 @@ async function handleScan(code, fromCamera){
     const r = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS su Apps Script
-      body: JSON.stringify({ action: 'scan', code, delta, productInfo, referente })
+      body: JSON.stringify({ action: 'scan', code, delta, productInfo, referente, categoryOverride })
     });
     const result = await r.json();
 
@@ -462,10 +488,14 @@ async function handleScan(code, fromCamera){
       return;
     }
 
-    data.items[code] = data.items[code] || { name: result.name, category: (productInfo && productInfo.category) || 'Altro', weight: (productInfo && productInfo.weight) || '' };
+    data.items[code] = data.items[code] || { name: result.name, category: result.category || 'Fuori Lista', weight: (productInfo && productInfo.weight) || '' };
     data.items[code].qty = result.qty;
+    if(result.category) data.items[code].category = result.category;
     data.log.unshift({ code, name: result.name, delta, ts: now });
     data.log = data.log.slice(0, 40);
+
+    lastAction = { code, delta, referente, name: result.name };
+    updateUndoButton();
 
     showFeedback(delta > 0 ? 'ok' : 'warn', delta > 0 ? 'Caricato ✓' : 'Scaricato ✓', `${result.name} — ora: ${result.qty} pz`);
     if(fromCamera){ confirmScanEffect(); }
@@ -473,6 +503,43 @@ async function handleScan(code, fromCamera){
   }catch(e){
     console.error('Errore scrittura su Google Sheet', e);
     showFeedback('warn', 'Errore di collegamento', 'Controlla la connessione e riprova');
+  }
+}
+
+async function undoLastScan(){
+  if(!lastAction) return;
+  const { code, delta, referente: ref, name } = lastAction;
+  try{
+    const r = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'scan', code, delta: -delta, productInfo: null, referente: ref, categoryOverride: null })
+    });
+    const result = await r.json();
+    if(!result.ok){
+      showFeedback('warn', result.message || 'Impossibile annullare', '');
+      return;
+    }
+    if(data.items[code]) data.items[code].qty = result.qty;
+    if(data.log[0] && data.log[0].code === code) data.log.shift(); // toglie la riga dallo storico visibile
+
+    showFeedback('warn', 'Annullato ✓', `${name} — ora: ${result.qty} pz`);
+    lastAction = null;
+    updateUndoButton();
+    render();
+  }catch(e){
+    console.error('Errore annullamento', e);
+    showFeedback('warn', 'Errore di collegamento', 'Controlla la connessione e riprova');
+  }
+}
+
+function updateUndoButton(){
+  const btn = document.getElementById('undoBtn');
+  if(lastAction){
+    btn.style.display = 'block';
+    btn.textContent = `↩️ Annulla ultima scansione (${lastAction.name})`;
+  } else {
+    btn.style.display = 'none';
   }
 }
 
@@ -485,7 +552,6 @@ async function lookupProduct(code){
       const name = p.product_name_it || p.product_name || (p.brands ? p.brands : 'Prodotto senza nome');
       return {
         name: name,
-        category: guessCategory(p.categories),
         weight: p.quantity || ''
       };
     }
@@ -496,6 +562,12 @@ async function lookupProduct(code){
 }
 
 function render(){ renderLog(); renderInventory(); }
+
+function populateCategorySelect(){
+  const select = document.getElementById('categorySelect');
+  select.innerHTML = '<option value="">-- Seleziona categoria --</option>' +
+    CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
+}
 
 function renderLog(){
   const el = document.getElementById('logList');
@@ -705,6 +777,7 @@ function startQuagga(){
   });
 }
 
+populateCategorySelect();
 loadReferenti();
 loadInventoryFromSheet();
 </script>
