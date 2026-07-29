@@ -260,7 +260,7 @@
       </div>
 
       <div class="feedback" id="feedback"></div>
-      <button id="undoBtn" onclick="undoLastScan()" style="display:none;margin-top:10px;width:100%;padding:11px;border-radius:10px;border:2px solid var(--warn);background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:13.5px;cursor:pointer;"></button>
+
     </div>
   </div>
 
@@ -313,7 +313,7 @@ function isValidBarcode(code){
   return /^\d{8}$|^\d{12}$|^\d{13}$/.test(code);
 }
 let referente = '';
-let lastAction = null; // { code, delta, referente, name } — per il pulsante "Annulla"
+
 
 // Categorie reali usate dal magazzino CRI San Donato per organizzare gli scaffali e i pacchi.
 // Elenco fisso e volutamente chiuso: non modificabile da chi scansiona, solo da qui nel codice.
@@ -507,11 +507,10 @@ async function handleScan(code, fromCamera){
     data.items[code] = data.items[code] || { name: result.name, category: result.category || 'Fuori Lista', weight: (productInfo && productInfo.weight) || '' };
     data.items[code].qty = result.qty;
     if(result.category) data.items[code].category = result.category;
-    data.log.unshift({ code, name: result.name, delta, ts: now });
-    data.log = data.log.slice(0, 40);
 
-    lastAction = { code, delta, referente, name: result.name };
-    updateUndoButton();
+    const logId = 'l' + now + Math.random().toString(36).slice(2, 7);
+    data.log.unshift({ id: logId, code, name: result.name, delta, referente, ts: now, undone: false });
+    data.log = data.log.slice(0, 40);
 
     showFeedback(delta > 0 ? 'ok' : 'warn', delta > 0 ? 'Caricato ✓' : 'Scaricato ✓', `${result.name} — ora: ${result.qty} pz`);
     if(fromCamera){ confirmScanEffect(); }
@@ -522,40 +521,29 @@ async function handleScan(code, fromCamera){
   }
 }
 
-async function undoLastScan(){
-  if(!lastAction) return;
-  const { code, delta, referente: ref, name } = lastAction;
+async function undoScan(id){
+  const entry = data.log.find(l => l.id === id);
+  if(!entry || entry.undone) return;
+
   try{
     const r = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'scan', code, delta: -delta, productInfo: null, referente: ref, categoryOverride: null })
+      body: JSON.stringify({ action: 'scan', code: entry.code, delta: -entry.delta, productInfo: null, referente: entry.referente, categoryOverride: null })
     });
     const result = await r.json();
     if(!result.ok){
       showFeedback('warn', result.message || 'Impossibile annullare', '');
       return;
     }
-    if(data.items[code]) data.items[code].qty = result.qty;
-    if(data.log[0] && data.log[0].code === code) data.log.shift(); // toglie la riga dallo storico visibile
+    if(data.items[entry.code]) data.items[entry.code].qty = result.qty;
+    entry.undone = true;
 
-    showFeedback('warn', 'Annullato ✓', `${name} — ora: ${result.qty} pz`);
-    lastAction = null;
-    updateUndoButton();
+    showFeedback('warn', 'Annullato ✓', `${entry.name} — ora: ${result.qty} pz`);
     render();
   }catch(e){
     console.error('Errore annullamento', e);
     showFeedback('warn', 'Errore di collegamento', 'Controlla la connessione e riprova');
-  }
-}
-
-function updateUndoButton(){
-  const btn = document.getElementById('undoBtn');
-  if(lastAction){
-    btn.style.display = 'block';
-    btn.textContent = `↩️ Annulla ultima scansione (${lastAction.name})`;
-  } else {
-    btn.style.display = 'none';
   }
 }
 
@@ -611,9 +599,12 @@ function renderLog(){
   const el = document.getElementById('logList');
   if(!data.log.length){ el.innerHTML = '<div class="empty">Nessuna scansione ancora</div>'; return; }
   el.innerHTML = data.log.slice(0, 8).map(l => `
-    <div class="log-item">
-      <span>${l.name}</span>
-      <span class="delta ${l.delta > 0 ? 'plus' : 'minus'}">${l.delta > 0 ? '+1' : '−1'}</span>
+    <div class="log-item" style="${l.undone ? 'opacity:.45;' : ''}">
+      <span>${l.name}${l.undone ? ' <span style="color:var(--muted);font-weight:400;">(annullato)</span>' : ''}</span>
+      <span style="display:flex;align-items:center;gap:10px;">
+        <span class="delta ${l.delta > 0 ? 'plus' : 'minus'}">${l.delta > 0 ? '+1' : '−1'}</span>
+        ${!l.undone ? `<button onclick="undoScan('${l.id}')" title="Annulla questa scansione" style="border:none;background:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px;">↩️</button>` : ''}
+      </span>
     </div>
   `).join('');
 }
