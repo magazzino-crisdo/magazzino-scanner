@@ -250,6 +250,12 @@ let mode = 'carico';
 let data = { items: {}, log: [] };
 let cameraOn = false;
 let lastScan = { code: null, t: 0 };
+let scanLocked = false;
+
+function isValidBarcode(code){
+  // EAN-8, UPC-A (12), EAN-13: gli unici formati realistici su prodotti alimentari
+  return /^\d{8}$|^\d{12}$|^\d{13}$/.test(code);
+}
 let referente = '';
 
 const CATEGORY_RULES = [
@@ -345,10 +351,23 @@ function showFeedback(type, title, sub){
   showFeedback._t = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
-async function handleScan(code){
+async function handleScan(code, fromCamera){
+  code = (code || '').trim();
+
+  // Scarta letture chiaramente sbagliate (rumore tipico della fotocamera)
+  if(!isValidBarcode(code)) return;
+
+  // Durante la pausa post-scansione, ignora altre letture da fotocamera
+  if(fromCamera && scanLocked) return;
+
   const now = Date.now();
-  if(code === lastScan.code && (now - lastScan.t) < 1200) return; // debounce
+  if(code === lastScan.code && (now - lastScan.t) < 1500) return; // stesso codice troppo ravvicinato
   lastScan = { code, t: now };
+
+  if(fromCamera){
+    scanLocked = true;
+    setTimeout(() => { scanLocked = false; }, 1800); // pausa tra una scansione fotocamera e la successiva
+  }
 
   const delta = mode === 'carico' ? 1 : -1;
   let item = data.items[code];
@@ -488,7 +507,7 @@ function startQuagga(){
       target: document.querySelector('#interactive'),
       constraints: { facingMode: 'environment' }
     },
-    decoder: { readers: ['ean_reader','ean_8_reader','upc_reader','code_128_reader'] },
+    decoder: { readers: ['ean_reader','ean_8_reader','upc_reader'] },
     locate: true
   }, function(err){
     if(err){ console.error(err); showFeedback('warn','Impossibile accedere alla fotocamera',''); return; }
@@ -497,7 +516,7 @@ function startQuagga(){
 
   Quagga.onDetected((result) => {
     const code = result.codeResult.code;
-    if(code){ handleScan(code); }
+    if(code){ handleScan(code, true); }
   });
 }
 
