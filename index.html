@@ -254,6 +254,9 @@ let data = { items: {}, log: [] };
 let cameraOn = false;
 let lastScan = { code: null, t: 0 };
 let scanLocked = false;
+let detectionBuffer = [];
+const CONFIRM_READS = 3;      // quante letture identiche servono prima di accettare
+const CONFIRM_WINDOW_MS = 900; // entro quanti millisecondi devono arrivare
 
 function isValidBarcode(code){
   // EAN-8, UPC-A (12), EAN-13: gli unici formati realistici su prodotti alimentari
@@ -369,7 +372,7 @@ async function handleScan(code, fromCamera){
 
   if(fromCamera){
     scanLocked = true;
-    setTimeout(() => { scanLocked = false; }, 1800); // pausa tra una scansione fotocamera e la successiva
+    setTimeout(() => { scanLocked = false; }, 2000); // pausa tra una scansione fotocamera e la successiva
   }
 
   const delta = mode === 'carico' ? 1 : -1;
@@ -523,7 +526,18 @@ function startQuagga(){
 
   Quagga.onDetected((result) => {
     const code = result.codeResult.code;
-    if(code){ handleScan(code, true); }
+    if(!code || !isValidBarcode(code)) return; // scarta letture di formato impossibile
+    if(scanLocked) return; // in pausa dopo l'ultima scansione accettata
+
+    const now = Date.now();
+    detectionBuffer.push({ code, t: now });
+    detectionBuffer = detectionBuffer.filter(d => now - d.t < CONFIRM_WINDOW_MS);
+
+    const matches = detectionBuffer.filter(d => d.code === code).length;
+    if(matches >= CONFIRM_READS){
+      detectionBuffer = [];
+      handleScan(code, true);
+    }
   });
 }
 
