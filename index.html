@@ -118,6 +118,24 @@
   .cam-frame{
     position:absolute;left:8%;right:8%;top:38%;bottom:38%;
     border:2px solid var(--cri-red);border-radius:8px;pointer-events:none;
+    transition:border-color .15s ease;
+  }
+  .cam-frame.confirmed{border-color:var(--success);border-width:4px;}
+
+  .scan-flash{
+    position:absolute;inset:0;background:rgba(31,138,76,0);
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:none;transition:background .1s ease;
+  }
+  .scan-flash.show{background:rgba(31,138,76,.55);}
+  .scan-flash .check{
+    width:64px;height:64px;border-radius:50%;background:#fff;
+    display:flex;align-items:center;justify-content:center;
+    opacity:0;transform:scale(.6);transition:all .15s ease;
+  }
+  .scan-flash.show .check{opacity:1;transform:scale(1);}
+  .scan-flash .check::after{
+    content:"✓";color:var(--success);font-size:34px;font-weight:700;
   }
 
   .feedback{
@@ -218,7 +236,7 @@
       </div>
 
       <button class="cam-btn" id="camToggle" onclick="toggleCamera()">📷 Attiva fotocamera per scansionare</button>
-      <div id="camWrap"><div id="interactive"></div><div class="cam-frame"></div></div>
+      <div id="camWrap"><div id="interactive"></div><div class="cam-frame" id="camFrame"></div><div class="scan-flash" id="scanFlash"><div class="check"></div></div></div>
 
       <div class="feedback" id="feedback"></div>
     </div>
@@ -349,6 +367,35 @@ document.getElementById('barcodeInput').addEventListener('keydown', (e) => {
 });
 
 
+function confirmScanEffect(){
+  // Flash verde + spunta sopra l'immagine della fotocamera, cornice verde
+  const flash = document.getElementById('scanFlash');
+  const frame = document.getElementById('camFrame');
+  flash.classList.add('show');
+  frame.classList.add('confirmed');
+  setTimeout(() => {
+    flash.classList.remove('show');
+    frame.classList.remove('confirmed');
+  }, 550);
+
+  // Vibrazione breve (se supportata dal dispositivo)
+  if(navigator.vibrate){ navigator.vibrate(80); }
+
+  // Beep acustico breve, generato al volo (nessun file audio necessario)
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.18);
+  }catch(e){ /* audio non disponibile, non bloccante */ }
+}
+
 function showFeedback(type, title, sub){
   const el = document.getElementById('feedback');
   el.className = 'feedback show ' + type;
@@ -412,6 +459,7 @@ async function handleScan(code, fromCamera){
     data.log = data.log.slice(0, 40);
 
     showFeedback(delta > 0 ? 'ok' : 'warn', delta > 0 ? 'Caricato ✓' : 'Scaricato ✓', `${result.name} — ora: ${result.qty} pz`);
+    if(fromCamera){ confirmScanEffect(); }
     render();
   }catch(e){
     console.error('Errore scrittura su Google Sheet', e);
