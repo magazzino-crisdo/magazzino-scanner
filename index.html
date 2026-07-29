@@ -203,7 +203,16 @@
     <div class="sub">Prova con fotocamera o pistola USB/wireless</div>
   </header>
 
-  <div class="section" id="loginSection">
+  <div class="section" id="pinSection">
+    <div class="card">
+      <label class="field-label" for="pinInput">Codice di accesso magazzino</label>
+      <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="Inserisci il codice..." autocomplete="off" style="width:100%;padding:14px;font-size:20px;letter-spacing:4px;text-align:center;border-radius:10px;border:2px solid var(--border);font-family:'Space Grotesk',sans-serif;background:#fdfcfa;">
+      <button class="cam-btn" style="border-style:solid;border-color:var(--success);color:var(--success);margin-top:12px;" onclick="checkPin()">Entra →</button>
+      <div id="pinError" style="display:none;color:var(--cri-red);font-size:12.5px;margin-top:8px;text-align:center;">Codice errato, riprova.</div>
+    </div>
+  </div>
+
+  <div class="section" id="loginSection" style="display:none;">
     <div class="card">
       <label class="field-label" for="referenteSelect">Chi sta scansionando?</label>
       <select id="referenteSelect" style="width:100%;padding:12px;font-size:15px;border-radius:10px;border:2px solid var(--border);font-family:'Space Grotesk',sans-serif;background:#fdfcfa;">
@@ -266,6 +275,8 @@
     <h2>Giacenze magazzino</h2>
     <input class="search-box" id="searchBox" placeholder="Cerca prodotto..." oninput="renderInventory()">
     <div id="inventoryView"><div class="empty">Il magazzino è vuoto — inizia a scansionare</div></div>
+    <button class="cam-btn" onclick="refreshGiacenzeSheet()" style="margin-top:10px;">🔄 Aggiorna riepilogo su Google Sheet</button>
+    <div id="refreshStatus" style="display:none;text-align:center;font-size:12px;color:var(--muted);margin-top:6px;"></div>
   </div>
 
   <div class="footer-note">
@@ -279,6 +290,12 @@
 // (quello che finisce in /exec, ottenuto al momento del Deploy)
 // ==========================================================
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzZ-Mr-9O26_aRt4EW_NxD2wm2lc31QrNEcOKPY8J6T9z1GXnEOz9mD43eJsRs4KDDlpQ/exec';
+
+// ==========================================================
+// CODICE DI ACCESSO CONDIVISO (cambialo con un numero a tua scelta)
+// ==========================================================
+const ACCESS_PIN = '2026';
+const PIN_STORAGE_KEY = 'magazzino_cri_pin_ok';
 
 let mode = 'carico';
 let data = { items: {}, log: [] };
@@ -563,6 +580,28 @@ async function lookupProduct(code){
 
 function render(){ renderLog(); renderInventory(); }
 
+async function refreshGiacenzeSheet(){
+  const status = document.getElementById('refreshStatus');
+  status.style.display = 'block';
+  status.textContent = 'Aggiornamento in corso...';
+  try{
+    const r = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'refreshGiacenze' })
+    });
+    const result = await r.json();
+    if(result.ok){
+      status.textContent = `✓ Riepilogo aggiornato (${result.updated} prodotti) — vedi scheda "Giacenze" su Google Sheet`;
+    } else {
+      status.textContent = 'Errore durante l\'aggiornamento';
+    }
+  }catch(e){
+    console.error('Errore aggiornamento Giacenze', e);
+    status.textContent = 'Errore di collegamento';
+  }
+}
+
 function populateCategorySelect(){
   const select = document.getElementById('categorySelect');
   select.innerHTML = '<option value="">-- Seleziona categoria --</option>' +
@@ -777,6 +816,37 @@ function startQuagga(){
   });
 }
 
+function checkPin(){
+  const input = document.getElementById('pinInput');
+  const error = document.getElementById('pinError');
+  if(input.value === ACCESS_PIN){
+    try{ localStorage.setItem(PIN_STORAGE_KEY, 'true'); }catch(e){}
+    error.style.display = 'none';
+    document.getElementById('pinSection').style.display = 'none';
+    document.getElementById('loginSection').style.display = 'block';
+  } else {
+    error.style.display = 'block';
+    input.value = '';
+    input.focus();
+  }
+}
+
+document.getElementById('pinInput').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ checkPin(); }
+});
+
+function initAccessGate(){
+  let alreadyOk = false;
+  try{ alreadyOk = localStorage.getItem(PIN_STORAGE_KEY) === 'true'; }catch(e){}
+  if(alreadyOk){
+    document.getElementById('pinSection').style.display = 'none';
+    document.getElementById('loginSection').style.display = 'block';
+  } else {
+    document.getElementById('pinInput').focus();
+  }
+}
+
+initAccessGate();
 populateCategorySelect();
 loadReferenti();
 loadInventoryFromSheet();
