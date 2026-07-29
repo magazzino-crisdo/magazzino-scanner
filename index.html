@@ -236,6 +236,7 @@
       </div>
 
       <button class="cam-btn" id="camToggle" onclick="toggleCamera()">📷 Attiva fotocamera per scansionare</button>
+      <div id="engineLabel" style="display:none;text-align:center;font-size:11px;color:var(--muted);margin-top:6px;"></div>
       <div id="camWrap">
         <div id="interactive"></div>
         <video id="nativeVideo" playsinline muted autoplay style="display:none;"></video>
@@ -549,6 +550,7 @@ async function toggleCamera(){
   cameraOn = !cameraOn;
   const wrap = document.getElementById('camWrap');
   const btn = document.getElementById('camToggle');
+  const engineLabel = document.getElementById('engineLabel');
 
   if(cameraOn){
     wrap.classList.add('show');
@@ -561,10 +563,16 @@ async function toggleCamera(){
     } else {
       startQuagga(); // riserva per browser senza motore nativo (es. iPhone/Safari)
     }
+
+    engineLabel.style.display = 'block';
+    engineLabel.textContent = usingNativeDetector
+      ? '🎯 Motore di lettura: nativo del telefono'
+      : '⚙️ Motore di lettura: compatibilità (riserva)';
   } else {
     wrap.classList.remove('show');
     btn.classList.remove('on');
     btn.textContent = '📷 Attiva fotocamera per scansionare';
+    engineLabel.style.display = 'none';
     stopAllScanners();
   }
 }
