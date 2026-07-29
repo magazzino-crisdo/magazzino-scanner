@@ -108,10 +108,13 @@
     background:#fff;font-weight:600;font-size:14px;cursor:pointer;color:var(--ink);
   }
   .cam-btn.on{border-style:solid;border-color:var(--cri-red);color:var(--cri-red);}
-  #camWrap{margin-top:10px;border-radius:12px;overflow:hidden;display:none;position:relative;background:#000;}
+  #camWrap{margin-top:10px;border-radius:12px;overflow:hidden;display:none;position:relative;background:#000;aspect-ratio:4/3;}
   #camWrap.show{display:block;}
-  #interactive{width:100%;position:relative;}
-  #interactive video, #interactive canvas{width:100%;display:block;}
+  #interactive{width:100%;height:100%;position:relative;}
+  #interactive video, #interactive canvas{
+    width:100% !important;height:100% !important;
+    object-fit:cover;position:absolute;top:0;left:0;display:block;
+  }
   .cam-frame{
     position:absolute;left:8%;right:8%;top:38%;bottom:38%;
     border:2px solid var(--cri-red);border-radius:8px;pointer-events:none;
@@ -505,7 +508,11 @@ function startQuagga(){
     inputStream: {
       type: 'LiveStream',
       target: document.querySelector('#interactive'),
-      constraints: { facingMode: 'environment' }
+      constraints: {
+        facingMode: 'environment',
+        width: { ideal: 800 },
+        height: { ideal: 600 }
+      }
     },
     decoder: { readers: ['ean_reader','ean_8_reader','upc_reader'] },
     locate: true
