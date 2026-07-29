@@ -275,8 +275,9 @@ let scanLocked = false;
 let detectionBuffer = [];
 let lastAcceptedCode = null;
 let framesSinceAnyCode = 0; // conta i fotogrammi consecutivi SENZA alcun codice visibile
-const CONFIRM_READS = 3;      // quante letture identiche servono prima di accettare
-const CONFIRM_WINDOW_MS = 900; // entro quanti millisecondi devono arrivare
+const CONFIRM_READS = 4;      // quante letture identiche servono prima di accettare
+const CONFIRM_WINDOW_MS = 1200; // entro quanti millisecondi devono arrivare
+const MAX_DECODE_ERROR = 0.10; // soglia di affidabilità lettura (più basso = più severo)
 
 function isValidBarcode(code){
   // EAN-8, UPC-A (12), EAN-13: gli unici formati realistici su prodotti alimentari
@@ -418,6 +419,10 @@ async function handleScan(code, fromCamera){
 
   if(fromCamera){
     lastAcceptedCode = code; // resta "bloccato" finché non sparisce dall'inquadratura (vedi onProcessed)
+    if(window.Quagga){
+      Quagga.pause();
+      setTimeout(() => { if(cameraOn && window.Quagga) Quagga.start(); }, 1200);
+    }
   }
 
   const delta = mode === 'carico' ? 1 : -1;
@@ -570,7 +575,7 @@ function startQuagga(){
     Quagga.start();
   });
 
-  const FRAMES_TO_CONFIRM_ABSENCE = 4; // fotogrammi consecutivi "vuoti" prima di considerare il codice fuori inquadratura
+  const FRAMES_TO_CONFIRM_ABSENCE = 6; // fotogrammi consecutivi "vuoti" prima di considerare il codice fuori inquadratura
 
   Quagga.onProcessed((result) => {
     const codeSeen = result && result.codeResult && result.codeResult.code;
@@ -584,9 +589,18 @@ function startQuagga(){
     }
   });
 
+  function readingQualityOk(result){
+    const codes = result.codeResult.decodedCodes || [];
+    const errors = codes.map(c => c.error).filter(e => e !== undefined);
+    if(!errors.length) return true; // nessuna info di errore disponibile, non blocchiamo
+    const avgError = errors.reduce((a,b) => a + b, 0) / errors.length;
+    return avgError < MAX_DECODE_ERROR;
+  }
+
   Quagga.onDetected((result) => {
     const code = result.codeResult.code;
     if(!code || !isValidBarcode(code)) return; // scarta letture di formato impossibile
+    if(!readingQualityOk(result)) return; // lettura poco affidabile (codice sporco/curvo/sfocato)
     if(code === lastAcceptedCode) return; // stesso prodotto ancora inquadrato: aspetta che sparisca
 
     const now = Date.now();
