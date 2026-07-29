@@ -111,7 +111,7 @@
   #camWrap{margin-top:10px;border-radius:12px;overflow:hidden;display:none;position:relative;background:#000;aspect-ratio:4/3;}
   #camWrap.show{display:block;}
   #interactive{width:100%;height:100%;position:relative;}
-  #interactive video, #interactive canvas{
+  #interactive video, #interactive canvas, #nativeVideo{
     width:100% !important;height:100% !important;
     object-fit:cover;position:absolute;top:0;left:0;display:block;
   }
@@ -236,7 +236,12 @@
       </div>
 
       <button class="cam-btn" id="camToggle" onclick="toggleCamera()">📷 Attiva fotocamera per scansionare</button>
-      <div id="camWrap"><div id="interactive"></div><div class="cam-frame" id="camFrame"></div><div class="scan-flash" id="scanFlash"><div class="check"></div></div></div>
+      <div id="camWrap">
+        <div id="interactive"></div>
+        <video id="nativeVideo" playsinline muted autoplay style="display:none;"></video>
+        <div class="cam-frame" id="camFrame"></div>
+        <div class="scan-flash" id="scanFlash"><div class="check"></div></div>
+      </div>
 
       <div class="feedback" id="feedback"></div>
     </div>
@@ -418,8 +423,8 @@ async function handleScan(code, fromCamera){
   lastScan = { code, t: now };
 
   if(fromCamera){
-    lastAcceptedCode = code; // resta "bloccato" finché non sparisce dall'inquadratura (vedi onProcessed)
-    if(window.Quagga){
+    lastAcceptedCode = code; // resta "bloccato" finché non sparisce dall'inquadratura
+    if(!usingNativeDetector && window.Quagga){
       Quagga.pause();
       setTimeout(() => { if(cameraOn && window.Quagga) Quagga.start(); }, 1200);
     }
@@ -536,24 +541,101 @@ function renderInventory(){
 }
 
 // --- Fotocamera (Quagga) ---
-function toggleCamera(){
+let nativeStream = null;
+let nativeLoopActive = false;
+let usingNativeDetector = false;
+
+async function toggleCamera(){
   cameraOn = !cameraOn;
   const wrap = document.getElementById('camWrap');
   const btn = document.getElementById('camToggle');
+
   if(cameraOn){
     wrap.classList.add('show');
     btn.classList.add('on');
     btn.textContent = '⏹ Ferma fotocamera';
-    startQuagga();
+
+    if('BarcodeDetector' in window){
+      const started = await startNativeScanner();
+      if(!started) startQuagga(); // riserva se il motore nativo non riesce ad avviarsi
+    } else {
+      startQuagga(); // riserva per browser senza motore nativo (es. iPhone/Safari)
+    }
   } else {
     wrap.classList.remove('show');
     btn.classList.remove('on');
     btn.textContent = '📷 Attiva fotocamera per scansionare';
-    if(window.Quagga) Quagga.stop();
+    stopAllScanners();
+  }
+}
+
+function stopAllScanners(){
+  nativeLoopActive = false;
+  usingNativeDetector = false;
+  if(nativeStream){
+    nativeStream.getTracks().forEach(t => t.stop());
+    nativeStream = null;
+  }
+  document.getElementById('nativeVideo').style.display = 'none';
+  document.getElementById('interactive').style.display = '';
+  if(window.Quagga){ try{ Quagga.stop(); }catch(e){} }
+}
+
+// --- Motore di lettura nativo del telefono (stesso usato da Google Lens / app dedicate) ---
+async function startNativeScanner(){
+  try{
+    const formats = await BarcodeDetector.getSupportedFormats();
+    const wanted = ['ean_13','ean_8','upc_a','upc_e'].filter(f => formats.includes(f));
+    if(!wanted.length) return false; // il telefono non supporta questi formati nativamente
+
+    const detector = new BarcodeDetector({ formats: wanted });
+    const video = document.getElementById('nativeVideo');
+
+    nativeStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 800 }, height: { ideal: 600 } }
+    });
+    video.srcObject = nativeStream;
+    await video.play();
+
+    document.getElementById('interactive').style.display = 'none';
+    video.style.display = 'block';
+    usingNativeDetector = true;
+    nativeLoopActive = true;
+
+    const tick = async () => {
+      if(!nativeLoopActive) return;
+      try{
+        const results = await detector.detect(video);
+        if(results.length){
+          framesSinceAnyCode = 0;
+          const code = (results[0].rawValue || '').trim();
+          if(isValidBarcode(code) && code !== lastAcceptedCode){
+            lastAcceptedCode = code;
+            handleScan(code, true); // il motore nativo è già affidabile: basta una lettura buona
+            nativeLoopActive = false;
+            setTimeout(() => {
+              nativeLoopActive = true;
+              requestAnimationFrame(tick);
+            }, 1000); // breve pausa per dare tempo di allontanare il telefono
+            return;
+          }
+        } else {
+          framesSinceAnyCode++;
+          if(framesSinceAnyCode >= 6){ lastAcceptedCode = null; } // il codice è uscito dall'inquadratura
+        }
+      }catch(e){ /* fotogramma non leggibile, si riprova al successivo */ }
+      if(nativeLoopActive) requestAnimationFrame(tick);
+    };
+    tick();
+    return true;
+  }catch(e){
+    console.error('Motore nativo non disponibile', e);
+    return false;
   }
 }
 
 function startQuagga(){
+  usingNativeDetector = false;
   if(!window.Quagga){
     showFeedback('warn', 'Libreria fotocamera non disponibile', 'Usa la pistola o inserimento manuale');
     return;
