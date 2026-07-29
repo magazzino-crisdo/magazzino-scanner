@@ -272,10 +272,9 @@
   </div>
 
   <div class="section">
-    <h2>Giacenze magazzino</h2>
-    <input class="search-box" id="searchBox" placeholder="Cerca prodotto..." oninput="renderInventory()">
-    <div id="inventoryView"><div class="empty">Il magazzino è vuoto — inizia a scansionare</div></div>
-    <button class="cam-btn" onclick="refreshGiacenzeSheet()" style="margin-top:10px;">🔄 Aggiorna riepilogo su Google Sheet</button>
+    <h2>Riepilogo giacenze</h2>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;">Le giacenze si consultano sul Google Sheet, scheda "Giacenze" — qui puoi solo aggiornarla.</p>
+    <button class="cam-btn" onclick="refreshGiacenzeSheet()">🔄 Aggiorna riepilogo su Google Sheet</button>
     <div id="refreshStatus" style="display:none;text-align:center;font-size:12px;color:var(--muted);margin-top:6px;"></div>
   </div>
 
@@ -578,7 +577,7 @@ async function lookupProduct(code){
   return { name: `Prodotto non trovato (${code})`, category: 'Altro', weight: '' };
 }
 
-function render(){ renderLog(); renderInventory(); }
+function render(){ renderLog(); }
 
 async function refreshGiacenzeSheet(){
   const status = document.getElementById('refreshStatus');
@@ -617,39 +616,6 @@ function renderLog(){
       <span class="delta ${l.delta > 0 ? 'plus' : 'minus'}">${l.delta > 0 ? '+1' : '−1'}</span>
     </div>
   `).join('');
-}
-
-function renderInventory(){
-  const el = document.getElementById('inventoryView');
-  const search = (document.getElementById('searchBox').value || '').toLowerCase();
-  const entries = Object.entries(data.items).filter(([code, it]) =>
-    !search || it.name.toLowerCase().includes(search)
-  );
-
-  if(!entries.length){
-    el.innerHTML = '<div class="empty">Nessun prodotto trovato</div>';
-    return;
-  }
-
-  const byCat = {};
-  entries.forEach(([code, it]) => {
-    if(!byCat[it.category]) byCat[it.category] = [];
-    byCat[it.category].push([code, it]);
-  });
-
-  el.innerHTML = Object.entries(byCat).sort((a,b) => a[0].localeCompare(b[0])).map(([cat, items]) => {
-    const total = items.reduce((s,[,it]) => s + it.qty, 0);
-    const rows = items.sort((a,b) => b[1].qty - a[1].qty).map(([code, it]) => `
-      <div class="item-row">
-        <span class="item-name">${it.name}${it.weight ? `<span class="w">${it.weight}</span>` : ''}</span>
-        <span class="qty">${it.qty}</span>
-      </div>
-    `).join('');
-    return `<div class="cat-group">
-      <div class="cat-title"><span>${cat}</span><span class="tot">${total} pz</span></div>
-      ${rows}
-    </div>`;
-  }).join('');
 }
 
 // --- Fotocamera (Quagga) ---
